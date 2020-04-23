@@ -367,7 +367,7 @@ lspShakeProgress getLspId sendMsg inProgress = do
                         , _value = LSP.WorkDoneProgressReportParams
                         { _cancellable = Nothing
                         , _message = next
-                        , _percentage = Just ((fromIntegral done) / (fromIntegral todo))
+                        , _percentage = Just (100.0 * ((fromIntegral done) / (fromIntegral todo)))
                         }
                         }
             loop id next
