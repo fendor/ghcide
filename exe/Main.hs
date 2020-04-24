@@ -50,7 +50,7 @@ import qualified System.Directory.Extra as IO
 import System.Environment
 import System.IO
 import System.Exit
-import HIE.Bios.Environment (addCmdOpts)
+import HIE.Bios.Environment (addCmdOpts, makeDynFlagsAbsolute)
 import Paths_ghcide
 import Development.GitRev
 import Development.Shake (Action,  action)
@@ -441,7 +441,8 @@ memoIO op = do
 setOptions :: GhcMonad m => ComponentOptions -> DynFlags -> m (DynFlags, [Target])
 setOptions (ComponentOptions theOpts compRoot _) dflags = do
     cacheDir <- liftIO $ getCacheDir theOpts
-    (dflags', targets) <- addCmdOpts compRoot theOpts dflags
+    (dflags_, targets) <- addCmdOpts theOpts dflags
+    let dflags' = makeDynFlagsAbsolute compRoot dflags_
     let dflags'' =
           -- disabled, generated directly by ghcide instead
           flip gopt_unset Opt_WriteInterface $

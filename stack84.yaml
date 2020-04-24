@@ -13,7 +13,7 @@ extra-deps:
 - js-dgtable-0.5.2
 # - hie-bios-0.4.0
 - github: fendor/hie-bios
-  commit: d5b7fc9bb3025b1d4d2ac9c48b588faf18dfce99
+  commit: 89d28817716a1c8df7e191f3a43c4504bc6379eb
 - fuzzy-0.1.0.0
 - shake-0.18.5
 - time-compat-1.9.2.2
