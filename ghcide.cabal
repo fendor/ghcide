@@ -250,6 +250,8 @@ executable ghcide
     if flag(ghc-lib)
       buildable: False
     default-language:   Haskell2010
+    include-dirs:
+        include
     hs-source-dirs:     exe
     ghc-options:
                 -threaded
