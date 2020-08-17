@@ -30,10 +30,17 @@ instance NFData SafeHaskellMode where rnf = rwhnf
 instance Show Linkable where show = prettyPrint
 instance NFData Linkable where rnf = rwhnf
 
+#if MIN_GHC_API_VERSION(8,11,0)
+instance Show UnitId where
+    show = unitIdString
+
+instance NFData UnitId where rnf = rwhnf . unitIdFS
+#else
 instance Show InstalledUnitId where
     show = installedUnitIdString
 
-instance NFData InstalledUnitId where rnf = rwhnf . installedUnitIdFS
+instance NFData InstalledUnitId where rnf = rwhnf . unitIdFS
+#endif
 
 instance NFData SB.StringBuffer where rnf = rwhnf
 
@@ -62,9 +69,13 @@ instance NFData FastString where
 instance NFData ParsedModule where
     rnf = rwhnf
 
+#if MIN_GHC_API_VERSION(8,11,0)
+instance Hashable UnitId where
+  hashWithSalt salt = hashWithSalt salt . unitIdString
+#else
 instance Hashable InstalledUnitId where
   hashWithSalt salt = hashWithSalt salt . installedUnitIdString
-
+#endif
 instance Show HieFile where
     show = show . hie_module
 

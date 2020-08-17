@@ -17,12 +17,12 @@ import           Development.IDE.GHC.Error as ErrUtils
 import Development.IDE.GHC.Orphans()
 import Development.IDE.Types.Diagnostics
 import Development.IDE.Types.Location
-import Development.IDE.GHC.Compat
+import Development.IDE.GHC.Compat as Compat
 -- GHC imports
 import           FastString
 import qualified Module                      as M
 import           Packages
-import           Outputable                  (showSDoc, ppr, pprPanic)
+import           Outputable                  (ppr)
 import           Finder
 import Control.DeepSeq
 
@@ -35,7 +35,7 @@ import Data.Maybe
 
 data Import
   = FileImport !ArtifactsLocation
-  | PackageImport !M.InstalledUnitId
+  | PackageImport !InstalledUnitId
   deriving (Show)
 
 data ArtifactsLocation = ArtifactsLocation
@@ -84,15 +84,15 @@ locateModuleFile import_dirss exts doesExist isSource modName = do
 -- It only returns Just for unit-ids which are possible to import into the
 -- current module. In particular, it will return Nothing for 'main' components
 -- as they can never be imported into another package.
-mkImportDirs :: DynFlags -> (M.InstalledUnitId, DynFlags) -> Maybe (PackageName, [FilePath])
-mkImportDirs df (i, DynFlags{importPaths}) = (, importPaths) <$> getPackageName df i
+mkImportDirs :: DynFlags -> (InstalledUnitId, DynFlags) -> Maybe (PackageName, [FilePath])
+mkImportDirs df (i, DynFlags{importPaths}) = (, importPaths) <$> Compat.getPackageName df i
 
 -- | locate a module in either the file system or the package database. Where we go from *daml to
 -- Haskell
 locateModule
     :: MonadIO m
     => DynFlags
-    -> [(M.InstalledUnitId, DynFlags)] -- Sets import directories to look in
+    -> [(InstalledUnitId, DynFlags)] -- Sets import directories to look in
     -> [String]
     -> (NormalizedFilePath -> m Bool)
     -> Located ModuleName
@@ -132,7 +132,7 @@ locateModule dflags comp_info exts doesExist modName mbPkgName isSource = do
         Just file -> toModLocation file
 
     lookupInPackageDB dfs =
-      case lookupModuleWithSuggestions dfs (unLoc modName) mbPkgName of
+      case Compat.lookupModuleWithSuggestions dfs (unLoc modName) mbPkgName of
         LookupFound _m pkgConfig -> return $ Right $ PackageImport $ unitId pkgConfig
         reason -> return $ Left $ notFoundErr dfs modName reason
 
@@ -152,13 +152,13 @@ notFoundErr dfs modName reason =
         LookupMultiple rs -> FoundMultiple rs
         LookupHidden pkg_hiddens mod_hiddens ->
           notFound
-             { fr_pkgs_hidden = map (moduleUnitId . fst) pkg_hiddens
-             , fr_mods_hidden = map (moduleUnitId . fst) mod_hiddens
+             { fr_pkgs_hidden = map (moduleUnit . fst) pkg_hiddens
+             , fr_mods_hidden = map (moduleUnit . fst) mod_hiddens
              }
 #if MIN_GHC_API_VERSION(8,6,0)
         LookupUnusable unusable ->
           let unusables' = map get_unusable unusable
-              get_unusable (m, ModUnusable r) = (moduleUnitId m, r)
+              get_unusable (m, ModUnusable r) = (moduleUnit m, r)
               get_unusable (_, r) =
                 pprPanic "findLookupResult: unexpected origin" (ppr r)
            in notFound {fr_unusables = unusables'}

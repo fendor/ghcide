@@ -22,7 +22,7 @@
 module Development.IDE.GHC.CPP(doCpp, addOptP)
 where
 
-import Development.IDE.GHC.Compat
+import Development.IDE.GHC.Compat as Compat
 import Packages
 import SysTools
 import Module
@@ -53,8 +53,7 @@ doCpp :: DynFlags -> Bool -> FilePath -> FilePath -> IO ()
 doCpp dflags raw input_fn output_fn = do
     let hscpp_opts = picPOpts dflags
     let cmdline_include_paths = includePaths dflags
-
-    pkg_include_dirs <- getPackageIncludePath dflags []
+    pkg_include_dirs <- Compat.getUnitIncludePath dflags []
     let include_paths_global = foldr (\ x xs -> ("-I" ++ x) : xs) []
           (includePathsGlobal cmdline_include_paths ++ pkg_include_dirs)
     let include_paths_quote = foldr (\ x xs -> ("-iquote" ++ x) : xs) []
@@ -81,8 +80,8 @@ doCpp dflags raw input_fn output_fn = do
         -- and BUILD is the same as our HOST.
 
     let sse_defs =
-          [ "-D__SSE__"      | isSseEnabled      dflags ] ++
-          [ "-D__SSE2__"     | isSse2Enabled     dflags ] ++
+          [ "-D__SSE__"      | Compat.isSseEnabled  dflags ] ++
+          [ "-D__SSE2__"     | Compat.isSse2Enabled dflags ] ++
           [ "-D__SSE4_2__"   | isSse4_2Enabled   dflags ]
 
     let avx_defs =
@@ -101,8 +100,14 @@ doCpp dflags raw input_fn output_fn = do
     let hsSourceCppOpts = [ "-include", ghcVersionH ]
 
     -- MIN_VERSION macros
-    let uids = explicitPackages (pkgState dflags)
+    let
+        state = unitState dflags
+        uids = explicitUnits state
+#if MIN_GHC_API_VERSION (8,11,0)
+        pkgs = catMaybes (map (lookupUnit state) uids)
+#else
         pkgs = catMaybes (map (lookupPackage dflags) uids)
+#endif
     mb_macro_include <-
         if not (null pkgs) && gopt Opt_VersionMacros dflags
             then do macro_stub <- newTempName dflags TFL_CurrentModule "h"
@@ -145,7 +150,11 @@ doCpp dflags raw input_fn output_fn = do
                        ])
 
 getBackendDefs :: DynFlags -> IO [String]
+#if MIN_GHC_API_VERSION (8,11,0)
+getBackendDefs dflags | backend dflags == LLVM = do
+#else
 getBackendDefs dflags | hscTarget dflags == HscLlvm = do
+#endif
     llvmVer <- figureLlvmVersion dflags
     return $ case llvmVer of
 #if MIN_GHC_API_VERSION(8,8,2)
@@ -186,6 +195,17 @@ addOptP opt = onSettings (onOptP (opt:))
 -- ---------------------------------------------------------------------------
 -- Macros (cribbed from Cabal)
 
+
+#if MIN_GHC_API_VERSION (8,11,0)
+generatePackageVersionMacros :: [UnitInfo] -> String
+generatePackageVersionMacros pkgs = concat
+  -- Do not add any C-style comments. See #3389.
+  [ generateMacros "" pkgname version
+  | pkg <- pkgs
+  , let version = unitPackageVersion pkg
+        pkgname = map fixchar (unitPackageNameString pkg)
+  ]
+#else
 generatePackageVersionMacros :: [PackageConfig] -> String
 generatePackageVersionMacros pkgs = concat
   -- Do not add any C-style comments. See #3389.
@@ -194,6 +214,7 @@ generatePackageVersionMacros pkgs = concat
   , let version = packageVersion pkg
         pkgname = map fixchar (packageNameString pkg)
   ]
+#endif
 
 fixchar :: Char -> Char
 fixchar '-' = '_'
@@ -219,7 +240,7 @@ getGhcVersionPathName dflags = do
   candidates <- case ghcVersionFile dflags of
     Just path -> return [path]
     Nothing -> (map (</> "ghcversion.h")) <$>
-               (getPackageIncludePath dflags [toInstalledUnitId rtsUnitId])
+               (Compat.getUnitIncludePath dflags [rtsUnitId_])
 
   found <- filterM doesFileExist candidates
   case found of
@@ -227,3 +248,10 @@ getGhcVersionPathName dflags = do
                                     ("ghcversion.h missing; tried: "
                                       ++ intercalate ", " candidates))
       (x:_) -> return x
+  where
+    rtsUnitId_ =
+#if MIN_GHC_API_VERSION (8,11,0)
+      rtsUnitId
+#else
+      toInstalledUnitId rtsUnitId
+#endif

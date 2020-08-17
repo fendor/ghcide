@@ -22,10 +22,10 @@ import qualified Data.Set as S
 import           Development.Shake
 import           GHC.Generics                             (Generic)
 
-import Module (InstalledUnitId)
 import HscTypes (hm_iface, CgGuts, Linkable, HomeModInfo, ModDetails)
 
 import           Development.IDE.Spans.Type
+import qualified Development.IDE.GHC.Compat as Compat
 import           Development.IDE.Import.FindImports (ArtifactsLocation)
 import Data.ByteString (ByteString)
 
@@ -103,7 +103,7 @@ type instance RuleResult GhcSessionDeps = HscEnvEq
 
 -- | Resolve the imports in a module to the file path of a module
 -- in the same package or the package id of another package.
-type instance RuleResult GetLocatedImports = ([(Located ModuleName, Maybe ArtifactsLocation)], S.Set InstalledUnitId)
+type instance RuleResult GetLocatedImports = ([(Located ModuleName, Maybe ArtifactsLocation)], S.Set Compat.InstalledUnitId)
 
 -- | This rule is used to report import cycles. It depends on GetDependencyInformation.
 -- We cannot report the cycles directly from GetDependencyInformation since

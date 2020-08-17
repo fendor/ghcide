@@ -199,8 +199,8 @@ getPackageHieFile :: ShakeExtras
 getPackageHieFile ide mod file = do
     pkgState  <- hscEnv . fst <$> useE GhcSession file
     IdeOptions {..} <- liftIO $ getIdeOptionsIO ide
-    let unitId = moduleUnitId mod
-    case lookupPackageConfig unitId pkgState of
+    let unitId = toUnitId $ moduleUnit mod
+    case lookupUnitId (hsc_dflags pkgState) unitId of
         Just pkgConfig -> do
             -- 'optLocateHieFile' returns Nothing if the file does not exist
             hieFile <- liftIO $ optLocateHieFile optPkgLocationOpts pkgConfig mod
@@ -264,7 +264,7 @@ getParsedModuleRule = defineEarlyCutoff $ \GetParsedModule file -> do
 
 
 withOptHaddock :: HscEnv -> HscEnv
-withOptHaddock hsc = hsc{hsc_dflags = gopt_set (hsc_dflags hsc) Opt_Haddock}
+withOptHaddock hsc = set_hsc_dflags (gopt_set (hsc_dflags hsc) Opt_Haddock) hsc
 
 
 -- | Given some normal parse errors (first) and some from Haddock (second), merge them.

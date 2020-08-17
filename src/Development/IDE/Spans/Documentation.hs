@@ -20,16 +20,17 @@ import qualified Data.Text as T
 #if MIN_GHC_API_VERSION(8,6,0)
 import           Development.IDE.Core.Compile
 #endif
-import           Development.IDE.GHC.Compat
+import           Development.IDE.GHC.Compat as Compat
 import           Development.IDE.GHC.Error
 import           Development.IDE.Spans.Common
 import           System.Directory
 import           System.FilePath
 
 import           FastString
-import           SrcLoc (RealLocated)
+import           SrcLoc (RealLocated, getLoc, RealSrcSpan)
 import           GhcMonad
 import           Packages
+import qualified Module
 import           Name
 
 getDocumentationTryGhc :: GhcMonad m => Module -> [ParsedModule] -> Name -> m SpanDoc
@@ -88,7 +89,7 @@ getDocumentation
 -- more accurately.
 getDocumentation sources targetName = fromMaybe [] $ do
   -- Find the module the target is defined in.
-  targetNameSpan <- realSpan $ getLoc targetName
+  targetNameSpan <- realSpan $ Compat.getLoc targetName
   tc <-
     find ((==) (Just $ srcSpanFile targetNameSpan) . annotationFileName)
       $ reverse sources -- TODO : Is reversing the list here really neccessary?
@@ -101,7 +102,8 @@ getDocumentation sources targetName = fromMaybe [] $ do
   -- Sort the names' source spans.
   let sortedSpans = sortedNameSpans bs
   -- Now go ahead and extract the docs.
-  let docs = ann tc
+  let docs :: M.Map RealSrcSpan [RealLocated AnnotationComment]
+      docs = ann tc
   nameInd <- elemIndex targetNameSpan sortedSpans
   let prevNameSpan =
         if nameInd >= 1
@@ -112,7 +114,6 @@ getDocumentation sources targetName = fromMaybe [] $ do
   pure
       $ docHeaders
       $ filter (\(L target _) -> isBetween target prevNameSpan targetNameSpan)
-      $ mapMaybe (\(L l v) -> L <$> realSpan l <*> pure v)
       $ join
       $ M.elems
       docs
@@ -125,14 +126,14 @@ getDocumentation sources targetName = fromMaybe [] $ do
     -- Get source spans from names, discard unhelpful spans, remove
     -- duplicates and sort.
     sortedNameSpans :: [Located RdrName] -> [RealSrcSpan]
-    sortedNameSpans ls = nubSort (mapMaybe (realSpan . getLoc) ls)
+    sortedNameSpans ls = nubSort (mapMaybe (realSpan . Compat.getLoc) ls)
     isBetween target before after = before <= target && target <= after
-    ann = snd . pm_annotations
+    ann = apiAnnComments . pm_annotations
     annotationFileName :: ParsedModule -> Maybe FastString
     annotationFileName = fmap srcSpanFile . listToMaybe . realSpans . ann
-    realSpans :: M.Map SrcSpan [Located a] -> [RealSrcSpan]
+    realSpans :: M.Map RealSrcSpan [RealLocated a] -> [RealSrcSpan]
     realSpans =
-        mapMaybe (realSpan . getLoc)
+        (map SrcLoc.getLoc)
       . join
       . M.elems
 
@@ -174,9 +175,9 @@ lookupHtmlForModule mkDocPath df m = do
   where
     -- The file might use "." or "-" as separator
     go pkgDocDir = [mkDocPath pkgDocDir mn | mn <- [mndot,mndash]]
-    ui = moduleUnitId m
+    ui = Compat.toUnitId $ moduleUnit m
     mndash = map (\x -> if x == '.' then '-' else x) mndot
     mndot = moduleNameString $ moduleName m
 
-lookupHtmls :: DynFlags -> UnitId -> Maybe [FilePath]
-lookupHtmls df ui = haddockHTMLs <$> lookupPackage df ui
+lookupHtmls :: DynFlags -> Module.UnitId -> Maybe [FilePath]
+lookupHtmls df ui = unitHaddockHTMLs <$> Compat.lookupUnitId df ui

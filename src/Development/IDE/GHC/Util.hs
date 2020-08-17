@@ -25,7 +25,7 @@ module Development.IDE.GHC.Util(
     fingerprintFromStringBuffer,
     -- * General utilities
     readFileUtf8,
-    hDuplicateTo',
+    GHC.hDuplicateTo',
     setHieDir,
     dontWriteHieFiles,
     ) where
@@ -59,14 +59,13 @@ import qualified Data.ByteString          as BS
 import Lexer
 import StringBuffer
 import System.FilePath
-import HscTypes (cg_binds, md_types, cg_module, ModDetails, CgGuts, ic_dflags, hsc_IC, HscEnv(hsc_dflags))
-import PackageConfig (PackageConfig)
-import Outputable (showSDocUnsafe, ppr, showSDoc, Outputable)
-import Packages (getPackageConfigMap, lookupPackage')
+import HscTypes (cg_binds, md_types, cg_module, ModDetails
+                , CgGuts, ic_dflags, hsc_IC, HscEnv)
+import Outputable (ppr, Outputable)
 import SrcLoc (mkRealSrcLoc)
 import FastString (mkFastString)
 import DynFlags (emptyFilesToClean, unsafeGlobalDynFlags)
-import Module (moduleNameSlashes, InstalledUnitId)
+import Module (moduleNameSlashes, UnitId)
 import OccName (parenSymOcc)
 import RdrName (nameRdrName, rdrNameOcc)
 
@@ -85,17 +84,17 @@ modifyDynFlags f = do
   -- We do not use setSessionDynFlags here since we handle package
   -- initialization separately.
   modifySession $ \h ->
-    h { hsc_dflags = newFlags, hsc_IC = (hsc_IC h) {ic_dflags = newFlags} }
+    set_hsc_dflags newFlags h { hsc_IC = (hsc_IC h) {ic_dflags = newFlags} }
 
 -- | Given a 'UnitId' try and find the associated 'PackageConfig' in the environment.
-lookupPackageConfig :: UnitId -> HscEnv -> Maybe PackageConfig
+lookupPackageConfig :: UnitId -> HscEnv -> Maybe GHC.UnitInfo
 lookupPackageConfig unitId env =
-    lookupPackage' False pkgConfigMap unitId
+    GHC.lookupUnitId' pkgConfigMap unitId
     where
         pkgConfigMap =
             -- For some weird reason, the GHC API does not provide a way to get the PackageConfigMap
             -- from PackageState so we have to wrap it in DynFlags first.
-            getPackageConfigMap $ hsc_dflags env
+            GHC.getUnitInfoMap $ hsc_dflags env
 
 
 -- | Convert from the @text@ package to the @GHC@ 'StringBuffer'.
@@ -123,7 +122,7 @@ prettyPrint = showSDoc unsafeGlobalDynFlags . ppr
 
 -- | Pretty print a 'RdrName' wrapping operators in parens
 printRdrName :: RdrName -> String
-printRdrName name = showSDocUnsafe $ parenSymOcc rn (ppr rn)
+printRdrName name = showSDoc unsafeGlobalDynFlags $ parenSymOcc rn (ppr rn)
   where
     rn = rdrNameOcc name
 
@@ -143,7 +142,7 @@ runGhcEnv env act = do
     filesToClean <- newIORef emptyFilesToClean
     dirsToClean <- newIORef mempty
     let dflags = (hsc_dflags env){filesToClean=filesToClean, dirsToClean=dirsToClean, useUnicode=True}
-    ref <- newIORef env{hsc_dflags=dflags}
+    ref <- newIORef $ set_hsc_dflags dflags env
     res <- unGhc act (Session ref) `finally` do
         cleanTempFiles dflags
         cleanTempDirs dflags
@@ -230,72 +229,3 @@ fingerprintToBS (Fingerprint a b) = BS.unsafeCreate 8 $ \ptr -> do
 fingerprintFromStringBuffer :: StringBuffer -> IO Fingerprint
 fingerprintFromStringBuffer (StringBuffer buf len cur) =
     withForeignPtr buf $ \ptr -> fingerprintData (ptr `plusPtr` cur) len
-
-
--- | A slightly modified version of 'hDuplicateTo' from GHC.
---   Importantly, it avoids the bug listed in https://gitlab.haskell.org/ghc/ghc/merge_requests/2318.
-hDuplicateTo' :: Handle -> Handle -> IO ()
-hDuplicateTo' h1@(FileHandle path m1) h2@(FileHandle _ m2)  = do
- withHandle__' "hDuplicateTo" h2 m2 $ \h2_ -> do
-   -- The implementation in base has this call to hClose_help.
-   -- _ <- hClose_help h2_
-   -- hClose_help does two things:
-   -- 1. It flushes the buffer, we replicate this here
-   _ <- flushWriteBuffer h2_ `catch` \(_ :: IOException) -> pure ()
-   -- 2. It closes the handle. This is redundant since dup2 takes care of that
-   -- but even worse it is actively harmful! Once the handle has been closed
-   -- another thread is free to reallocate it. This leads to dup2 failing with EBUSY
-   -- if it happens just in the right moment.
-   withHandle_' "hDuplicateTo" h1 m1 $ \h1_ -> do
-     dupHandleTo path h1 Nothing h2_ h1_ (Just handleFinalizer)
-hDuplicateTo' h1@(DuplexHandle path r1 w1) h2@(DuplexHandle _ r2 w2)  = do
- withHandle__' "hDuplicateTo" h2 w2  $ \w2_ -> do
-   _ <- hClose_help w2_
-   withHandle_' "hDuplicateTo" h1 w1 $ \w1_ -> do
-     dupHandleTo path h1 Nothing w2_ w1_ (Just handleFinalizer)
- withHandle__' "hDuplicateTo" h2 r2  $ \r2_ -> do
-   _ <- hClose_help r2_
-   withHandle_' "hDuplicateTo" h1 r1 $ \r1_ -> do
-     dupHandleTo path h1 (Just w1) r2_ r1_ Nothing
-hDuplicateTo' h1 _ =
-  ioe_dupHandlesNotCompatible h1
-
--- | This is copied unmodified from GHC since it is not exposed.
-dupHandleTo :: FilePath
-            -> Handle
-            -> Maybe (MVar Handle__)
-            -> Handle__
-            -> Handle__
-            -> Maybe HandleFinalizer
-            -> IO Handle__
-dupHandleTo filepath h other_side
-            _hto_@Handle__{haDevice=devTo}
-            h_@Handle__{haDevice=dev} mb_finalizer = do
-  flushBuffer h_
-  case cast devTo of
-    Nothing   -> ioe_dupHandlesNotCompatible h
-    Just dev' -> do
-      _ <- IODevice.dup2 dev dev'
-      FileHandle _ m <- dupHandle_ dev' filepath other_side h_ mb_finalizer
-      takeMVar m
-
--- | This is copied unmodified from GHC since it is not exposed.
--- Note the beautiful inline comment!
-dupHandle_ :: (IODevice dev, BufferedIO dev, Typeable dev) => dev
-           -> FilePath
-           -> Maybe (MVar Handle__)
-           -> Handle__
-           -> Maybe HandleFinalizer
-           -> IO Handle
-dupHandle_ new_dev filepath other_side _h_@Handle__{..} mb_finalizer = do
-   -- XXX wrong!
-  mb_codec <- if isJust haEncoder then fmap Just getLocaleEncoding else return Nothing
-  mkHandle new_dev filepath haType True{-buffered-} mb_codec
-      NewlineMode { inputNL = haInputNL, outputNL = haOutputNL }
-      mb_finalizer other_side
-
--- | This is copied unmodified from GHC since it is not exposed.
-ioe_dupHandlesNotCompatible :: Handle -> IO a
-ioe_dupHandlesNotCompatible h =
-   ioException (IOError (Just h) IllegalOperation "hDuplicateTo"
-                "handles are incompatible" Nothing Nothing)

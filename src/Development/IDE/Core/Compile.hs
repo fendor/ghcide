@@ -85,6 +85,8 @@ import Control.DeepSeq (rnf)
 import Control.Exception (evaluate)
 import Exception (ExceptionMonad)
 import TcEnv (tcLookup)
+import GHC.Iface.Recomp
+import GHC.Iface.Load hiding (loadInterface)
 import Data.Time (UTCTime)
 
 
@@ -112,10 +114,10 @@ computePackageDeps
     -> IO (Either [FileDiagnostic] [InstalledUnitId])
 computePackageDeps env pkg = do
     let dflags = hsc_dflags env
-    case lookupInstalledPackage dflags pkg of
+    case Compat.lookupUnitId dflags pkg of
         Nothing -> return $ Left [ideErrorText (toNormalizedFilePath' noFilePath) $
             T.pack $ "unknown package: " ++ show pkg]
-        Just pkgInfo -> return $ Right $ depends pkgInfo
+        Just pkgInfo -> return $ Right $ unitDepends pkgInfo
 
 typecheckModule :: IdeDefer
                 -> HscEnv
@@ -298,7 +300,7 @@ generateAndWriteHiFile :: HscEnv -> TcModuleResult -> IO [FileDiagnostic]
 generateAndWriteHiFile hscEnv tc =
   handleGenerationErrors dflags "interface generation" $ do
     atomicFileWrite targetPath $ \fp ->
-      writeIfaceFile dflags fp modIface
+      writeIface dflags fp modIface
   where
     modIface = hm_iface $ tmrModInfo tc
     modSummary = tmrModSummary tc
@@ -341,7 +343,7 @@ setupFinderCache mss = do
 
     -- Make modules available for others that import them,
     -- by putting them in the finder cache.
-    let ims  = map (InstalledModule (thisInstalledUnitId $ hsc_dflags session) . moduleName . ms_mod) mss
+    let ims  = map (mkModule (Compat.homeUnitId_ $ hsc_dflags session) . moduleName . ms_mod) mss
         ifrs = zipWith (\ms -> InstalledFound (ms_location ms)) mss ims
     -- We have to create a new IORef here instead of modifying the existing IORef as
     -- it is shared between concurrent compilations.
@@ -367,15 +369,17 @@ loadModuleHome
     -> HscEnv
     -> HscEnv
 loadModuleHome mod_info e =
-    e { hsc_HPT = addToHpt (hsc_HPT e) mod_name mod_info }
+    set_hsc_HPT hpt e
     where
+      hpt =  addToHpt (hsc_HPT e) mod_name mod_info
       mod_name = moduleName $ mi_module $ hm_iface mod_info
 
 -- | Load module interface.
 loadDepModuleIO :: ModIface -> Maybe Linkable -> HscEnv -> IO HscEnv
 loadDepModuleIO iface linkable hsc = do
     details <- liftIO $ fixIO $ \details -> do
-        let hsc' = hsc { hsc_HPT = addToHpt (hsc_HPT hsc) mod (HomeModInfo iface details linkable) }
+        let hpt = addToHpt (hsc_HPT hsc) mod (HomeModInfo iface details linkable)
+        let hsc' = set_hsc_HPT hpt hsc
         initIfaceLoad hsc' (typecheckIface iface)
     let mod_info = HomeModInfo iface details linkable
     return $ loadModuleHome mod_info hsc
@@ -392,7 +396,7 @@ loadDepModule iface linkable = do
 -- name and its imports.
 getImportsParsed ::  DynFlags ->
                GHC.ParsedSource ->
-               Either [FileDiagnostic] (GHC.ModuleName, [(Bool, (Maybe FastString, Located GHC.ModuleName))])
+               Either [FileDiagnostic] (GHC.ModuleName, [(IsBootInterface, (Maybe FastString, Located GHC.ModuleName))])
 getImportsParsed dflags (L loc parsed) = do
   let modName = maybe (GHC.mkModuleName "Main") GHC.unLoc $ GHC.hsmodName parsed
 
@@ -420,12 +424,12 @@ getModSummaryFromBuffer fp modTime dflags parsed contents = do
   (modName, imports) <- liftEither $ getImportsParsed dflags parsed
 
   modLoc <- liftIO $ mkHomeModLocation dflags modName fp
-  let InstalledUnitId unitId = thisInstalledUnitId dflags
+  let unit = Compat.homeUnit_ dflags
   return $ ModSummary
-    { ms_mod          = mkModule (fsToUnitId unitId) modName
+    { ms_mod          = mkModule unit modName
     , ms_location     = modLoc
     , ms_hs_date      = modTime
-    , ms_textual_imps = [imp | (False, imp) <- imports]
+    , ms_textual_imps = [imp | (NotBoot, imp) <- imports]
     , ms_hspp_file    = fp
     , ms_hspp_opts    = dflags
         -- NOTE: It's /vital/ we set the 'StringBuffer' here, to give any
@@ -443,7 +447,7 @@ getModSummaryFromBuffer fp modTime dflags parsed contents = do
 #if MIN_GHC_API_VERSION(8,8,0)
     , ms_hie_date     = Nothing
 #endif
-    , ms_srcimps      = [imp | (True, imp) <- imports]
+    , ms_srcimps      = [imp | (IsBoot, imp) <- imports]
     , ms_parsed_mod   = Nothing
     }
     where
@@ -468,7 +472,7 @@ getModSummaryFromImports fp modTime contents = do
 
     modLoc <- liftIO $ mkHomeModLocation dflags moduleName fp
 
-    let mod = mkModule (thisPackage dflags) moduleName
+    let mod = mkModule (Compat.homeUnit_ dflags) moduleName
         sourceType = if "-boot" `isSuffixOf` takeExtension fp then HsBootFile else HsSrcFile
         summary =
             ModSummary
@@ -497,7 +501,7 @@ parseHeader
        => DynFlags -- ^ flags to use
        -> FilePath  -- ^ the filename (for source locations)
        -> SB.StringBuffer -- ^ Haskell module source text (full Unicode is supported)
-       -> ExceptT [FileDiagnostic] m ([FileDiagnostic], Located(HsModule GhcPs))
+       -> ExceptT [FileDiagnostic] m ([FileDiagnostic], Located(HsModule))
 parseHeader dflags filename contents = do
    let loc  = mkRealSrcLoc (mkFastString filename) 1 1
    case unP Parser.parseHeader (mkPState dflags contents loc) of
@@ -546,10 +550,11 @@ parseFileContents customPreprocessor dflags comp_pkgs filename modTime contents 
       throwE $ diagFromErrMsg "parser" dflags $ mkPlainErrMsg dflags locErr msgErr
 #endif
      POk pst rdr_module ->
-         let hpm_annotations =
-               (Map.fromListWith (++) $ annotations pst,
-                 Map.fromList ((noSrcSpan,comment_q pst)
-                                  :annotations_comments pst))
+         let hpm_annotations = ApiAnns
+               (Map.fromListWith (++) $ annotations pst)
+               Nothing
+               (Map.fromList (annotations_comments pst))
+               []
              (warns, errs) = getMessages pst dflags
          in
            do
@@ -661,7 +666,7 @@ getDocsBatch _mod _names =
     compiled n =
       -- TODO: Find a more direct indicator.
       case nameSrcLoc n of
-        RealSrcLoc {} -> False
+        Compat.RealSrcLoc {} -> False
         UnhelpfulLoc {} -> True
 #else
     return []

@@ -593,6 +593,7 @@ newSession ShakeExtras{..} shakeDb systemActs userActs = do
                     return (logDelayedAction logger act)
                 liftIO $ atomically $ writeTVar actionInProgress Nothing
 
+        workRun :: (forall a. IO a ->  IO a) -> IO (IO ())
         workRun restore = do
           let systemActs' = pumpAction : map getAction systemActs
           res <- try @SomeException

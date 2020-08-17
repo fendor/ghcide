@@ -35,7 +35,7 @@ import HscTypes
 import Panic
 import           ErrUtils
 import           SrcLoc
-import qualified Outputable                 as Out
+import qualified Development.IDE.GHC.Compat                  as Compat
 import Exception (ExceptionMonad)
 
 
@@ -55,8 +55,8 @@ diagFromText diagSource sev loc msg = (toNormalizedFilePath' $ srcSpanToFilename
 -- | Produce a GHC-style error from a source span and a message.
 diagFromErrMsg :: T.Text -> DynFlags -> ErrMsg -> [FileDiagnostic]
 diagFromErrMsg diagSource dflags e =
-    [ diagFromText diagSource sev (errMsgSpan e) $ T.pack $ Out.showSDoc dflags $
-      ErrUtils.formatErrDoc dflags $ ErrUtils.errMsgDoc e
+    [ diagFromText diagSource sev (errMsgSpan e) $ T.pack $ Compat.showSDoc dflags $
+      Compat.formatErrDoc dflags $ ErrUtils.errMsgDoc e
     | Just sev <- [toDSeverity $ errMsgSeverity e]]
 
 
@@ -65,8 +65,8 @@ diagFromErrMsgs diagSource dflags = concatMap (diagFromErrMsg diagSource dflags)
 
 -- | Convert a GHC SrcSpan to a DAML compiler Range
 srcSpanToRange :: SrcSpan -> Range
-srcSpanToRange (UnhelpfulSpan _)  = noRange
-srcSpanToRange (RealSrcSpan real) = realSrcSpanToRange real
+srcSpanToRange (Compat.UnhelpfulSpan _)  = noRange
+srcSpanToRange (Compat.RealSrcSpan real) = realSrcSpanToRange real
 
 realSrcSpanToRange :: RealSrcSpan -> Range
 realSrcSpanToRange real =
@@ -76,8 +76,8 @@ realSrcSpanToRange real =
 -- | Extract a file name from a GHC SrcSpan (use message for unhelpful ones)
 -- FIXME This may not be an _absolute_ file name, needs fixing.
 srcSpanToFilename :: SrcSpan -> FilePath
-srcSpanToFilename (UnhelpfulSpan fs) = FS.unpackFS fs
-srcSpanToFilename (RealSrcSpan real) = FS.unpackFS $ srcSpanFile real
+srcSpanToFilename (Compat.UnhelpfulSpan fs) = FS.unpackFS fs
+srcSpanToFilename (Compat.RealSrcSpan real) = FS.unpackFS $ srcSpanFile real
 
 srcSpanToLocation :: SrcSpan -> Location
 srcSpanToLocation src =
@@ -112,7 +112,7 @@ diagFromString diagSource sev sp x = [diagFromText diagSource sev sp $ T.pack x]
 
 -- | Produces an "unhelpful" source span with the given string.
 noSpan :: String -> SrcSpan
-noSpan = UnhelpfulSpan . FS.fsLit
+noSpan = Compat.UnhelpfulSpan . FS.fsLit
 
 
 -- | creates a span with zero length in the filename of the argument passed
@@ -123,8 +123,8 @@ zeroSpan file = realSrcLocSpan (mkRealSrcLoc file 1 1)
 realSpan :: SrcSpan
          -> Maybe RealSrcSpan
 realSpan = \case
-  RealSrcSpan r -> Just r
-  UnhelpfulSpan _ -> Nothing
+  Compat.RealSrcSpan r -> Just r
+  Compat.UnhelpfulSpan _ -> Nothing
 
 
 -- | Run something in a Ghc monad and catch the errors (SourceErrors and
@@ -152,14 +152,14 @@ showGHCE dflags exc = case exc of
           -> unwords ["Compilation Issue:", s, "\n", requestReport]
         PprPanic  s sdoc
           -> unlines ["Compilation Issue", s,""
-                     , Out.showSDoc dflags sdoc
+                     , Compat.showSDoc dflags sdoc
                      , requestReport ]
 
         Sorry s
           -> "Unsupported feature: " <> s
         PprSorry s sdoc
           -> unlines ["Unsupported feature: ", s,""
-                     , Out.showSDoc dflags sdoc]
+                     , Compat.showSDoc dflags sdoc]
 
 
         ---------- errors below should not happen at all --------
@@ -176,6 +176,6 @@ showGHCE dflags exc = case exc of
             -> "Program error: " <> str
         PprProgramError str  sdoc  ->
             unlines ["Program error:", str,""
-                    , Out.showSDoc dflags sdoc]
+                    , Compat.showSDoc dflags sdoc]
   where
     requestReport = "Please report this bug to the compiler authors."

@@ -27,7 +27,6 @@ import           Development.IDE.LSP.Server
 import           Development.IDE.Types.Location
 import           Outputable                     ( Outputable
                                                 , ppr
-                                                , showSDocUnsafe
                                                 )
 
 setHandlersOutline :: PartialHandlers c
@@ -102,20 +101,22 @@ documentSymbolForDecl (L l (TyClD DataDecl { tcdLName = L _ name, tcdDataDefn = 
   = Just (defDocumentSymbol l :: DocumentSymbol)
     { _name     = showRdrName name
     , _kind     = SkStruct
-    , _children =
-      Just $ List
-        [ (defDocumentSymbol l :: DocumentSymbol)
-            { _name           = showRdrName n
-            , _kind           = SkConstructor
-            , _selectionRange = srcSpanToRange l'
-            , _children       = conArgRecordFields (getConArgs x)
-            }
-        | L l  x <- dd_cons
-        , L l' n <- getConNames x
-        ]
+    , _children = Nothing
+      -- Just $ List
+      --   [ (defDocumentSymbol l :: DocumentSymbol)
+      --       { _name           = showName n
+      --       , _kind           = SkConstructor
+      --       , _selectionRange = srcSpanToRange l'
+      --       , _children       = conArgRecordFields (getConArgs x)
+      --       }
+      --   | L l  x <- dd_cons
+      --   , L l' n <- getConNames x
+      --   ]
     }
   where
     -- | Extract the record fields of a constructor
+    conArgRecordFields :: HsConDeclDetails GhcRn
+                      -> Maybe (List DocumentSymbol)
     conArgRecordFields (RecCon (L _ lcdfs)) = Just $ List
       [ (defDocumentSymbol l :: DocumentSymbol)
           { _name = showRdrName n
@@ -229,6 +230,9 @@ defDocumentSymbol l = DocumentSymbol { .. } where
 
 showRdrName :: RdrName -> Text
 showRdrName = pprText
+
+showName :: Name -> Text
+showName = pprText
 
 pprText :: Outputable a => a -> Text
 pprText = pack . showSDocUnsafe . ppr

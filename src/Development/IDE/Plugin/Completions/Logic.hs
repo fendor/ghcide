@@ -191,7 +191,7 @@ mkNameCompItem origName origMod thingType isInfix docs = CI{..}
             let (args, ret) = splitFunTys t
               in if isForAllTy ret
                   then getArgs ret
-                  else Prelude.filter (not . isDictTy) args
+                  else Prelude.filter (not . isDictTy) $ map irrelevantMult args
           | isPiTy t = getArgs $ snd (splitPiTys t)
 #if MIN_GHC_API_VERSION(8,10,0)
           | Just (Pair _ t) <- coercionKind <$> isCoercionTy_maybe t
@@ -235,16 +235,16 @@ cacheDataProducer packageState tm deps = do
       curModName = moduleName curMod
       Just (_,limports,_,_) = tm_renamed_source tm
 
-      iDeclToModName :: ImportDecl name -> ModuleName
+      iDeclToModName :: ImportDecl GhcRn -> ModuleName
       iDeclToModName = unLoc . ideclName
 
-      asNamespace :: ImportDecl name -> ModuleName
+      asNamespace :: ImportDecl GhcRn -> ModuleName
       asNamespace imp = maybe (iDeclToModName imp) GHC.unLoc (ideclAs imp)
       -- Full canonical names of imported modules
       importDeclerations = map unLoc limports
 
       -- The list of all importable Modules from all packages
-      moduleNames = map showModName (listVisibleModuleNames dflags)
+      moduleNames = map showModName (listVisibleModuleNames $ GHC.unitState dflags)
 
       -- The given namespaces for the imported modules (ie. full name, or alias if used)
       allModNamesAsNS = map (showModName . asNamespace) importDeclerations
@@ -330,7 +330,7 @@ localCompletionsForParsedModule pm@ParsedModule{pm_parsed_source = L _ HsModule{
                 ]
             ValD PatBind{pat_lhs} ->
                 [mkComp id CiVariable Nothing
-                | VarPat id <- listify (\(_ :: Pat GhcPs) -> True) pat_lhs]
+                | VarPatPs id <- listify (\(_ :: Pat GhcPs) -> True) pat_lhs]
             TyClD ClassDecl{tcdLName, tcdSigs} ->
                 mkComp tcdLName CiClass Nothing :
                 [ mkComp id CiFunction (Just $ ppr typ)
@@ -462,7 +462,9 @@ getCompletions ideOpts CC { allModNamesAsNS, unqualCompls, qualCompls, importabl
 
 -- The supported languages and extensions
 languagesAndExts :: [T.Text]
-#if MIN_GHC_API_VERSION(8,10,0)
+#if MIN_GHC_API_VERSION(8,11,0)
+languagesAndExts = map T.pack $ DynFlags.supportedLanguagesAndExtensions ( ArchOS ArchUnknown OSUnknown )
+#elif MIN_GHC_API_VERSION(8,10,0)
 languagesAndExts = map T.pack $ DynFlags.supportedLanguagesAndExtensions ( PlatformMini ArchUnknown OSUnknown )
 #else
 languagesAndExts = map T.pack DynFlags.supportedLanguagesAndExtensions

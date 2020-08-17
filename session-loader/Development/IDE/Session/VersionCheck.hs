@@ -14,4 +14,4 @@ import qualified GHC.Paths
 import System.Environment
 
 ghcVersionChecker :: GhcVersionChecker
-ghcVersionChecker = $$(makeGhcVersionChecker (fromMaybe GHC.Paths.libdir <$> lookupEnv "NIX_GHC_LIBDIR"))
+ghcVersionChecker = undefined -- $$(makeGhcVersionChecker (fromMaybe GHC.Paths.libdir <$> lookupEnv "NIX_GHC_LIBDIR"))

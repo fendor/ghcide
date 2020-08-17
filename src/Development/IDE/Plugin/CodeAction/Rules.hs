@@ -10,9 +10,9 @@ import           Data.Text                      ( Text
 import           Data.Traversable               ( forM )
 import           Development.IDE.Core.Rules
 import           Development.IDE.GHC.Util
+import           Development.IDE.GHC.Compat as Compat
 import           Development.IDE.Plugin.CodeAction.RuleTypes
 import           Development.Shake
-import           GHC                            ( DynFlags(pkgState) )
 import           HscTypes                       ( IfaceExport
                                                 , hsc_dflags
                                                 , mi_exports
@@ -23,34 +23,32 @@ import           Module                         ( Module(..)
                                                 , ModuleName
                                                 , moduleNameString
                                                 )
-import           Packages                       ( explicitPackages
-                                                , exposedModules
-                                                , packageConfigId
-                                                )
 import           TcRnMonad                      ( WhereFrom(ImportByUser)
                                                 , initIfaceLoad
                                                 )
+import GHC.Unit.Info
+import GHC.Unit.Types
 
 rulePackageExports :: Rules ()
 rulePackageExports = defineNoFile $ \(PackageExports session) -> do
   let env     = hscEnv session
-      pkgst   = pkgState (hsc_dflags env)
-      depends = explicitPackages pkgst
+      pkgst   = Compat.unitState (hsc_dflags env)
+      depends = Compat.explicitUnits pkgst
       targets =
-        [ (pkg, mn)
+        [ (d, pkg, mn)
         | d        <- depends
-        , Just pkg <- [lookupPackageConfig d env]
-        , (mn, _)  <- exposedModules pkg
+        , Just pkg <- [lookupPackageConfig (Compat.toUnitId d) env]
+        , (mn, _)  <- unitExposedModules pkg
         ]
 
-  results <- forM targets $ \(pkg, mn) -> do
+  results <- forM targets $ \(unit, pkg, mn) -> do
     modIface <- liftIO $ initIfaceLoad env $ loadInterface
       ""
-      (Module (packageConfigId pkg) mn)
-      (ImportByUser False)
+      (mkModule unit mn)
+      (ImportByUser NotBoot)
     case modIface of
-      Failed    _err -> return mempty
-      Succeeded mi   -> do
+      Maybes.Failed    _err -> return mempty
+      Maybes.Succeeded mi   -> do
         let avails = mi_exports mi
         return $ concatMap (unpackAvail mn) avails
   return $ fromListWith (++) $ concat results

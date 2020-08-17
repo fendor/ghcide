@@ -50,6 +50,7 @@ import GHC.Generics (Generic)
 
 import Development.IDE.Types.Diagnostics
 import Development.IDE.Types.Location
+import qualified Development.IDE.GHC.Compat as Compat
 import Development.IDE.Import.FindImports (ArtifactsLocation(..))
 
 import GHC
@@ -60,7 +61,7 @@ data ModuleImports = ModuleImports
     { moduleImports :: ![(Located ModuleName, Maybe FilePathId)]
     -- ^ Imports of a module in the current package and the file path of
     -- that module on disk (if we found it)
-    , packageImports :: !(Set InstalledUnitId)
+    , packageImports :: !(Set Compat.InstalledUnitId)
     -- ^ Transitive package dependencies unioned for all imports.
     } deriving Show
 
@@ -130,7 +131,7 @@ data RawDependencyInformation = RawDependencyInformation
     , rawBootMap :: !BootIdMap
     } deriving Show
 
-pkgDependencies :: RawDependencyInformation -> FilePathIdMap (Set InstalledUnitId)
+pkgDependencies :: RawDependencyInformation -> FilePathIdMap (Set Compat.InstalledUnitId)
 pkgDependencies RawDependencyInformation{..} =
     IntMap.map (either (const Set.empty) packageImports) rawImports
 
@@ -142,7 +143,7 @@ data DependencyInformation =
     , depModuleDeps :: !(FilePathIdMap FilePathIdSet)
     -- ^ For a non-error node, this contains the set of module immediate dependencies
     -- in the same package.
-    , depPkgDeps :: !(FilePathIdMap (Set InstalledUnitId))
+    , depPkgDeps :: !(FilePathIdMap (Set Compat.InstalledUnitId))
     -- ^ For a non-error node, this contains the set of immediate pkg deps.
     , depPathIdMap :: !PathIdMap
     -- ^ Map from FilePath to FilePathId
@@ -348,7 +349,7 @@ data TransitiveDependencies = TransitiveDependencies
   , transitiveNamedModuleDeps :: [NamedModuleDep]
   -- ^ Transitive module dependencies in topological order.
   -- The module itself is not included.
-  , transitivePkgDeps :: [InstalledUnitId]
+  , transitivePkgDeps :: [Compat.InstalledUnitId]
   -- ^ Transitive pkg dependencies in unspecified order.
   } deriving (Eq, Show, Generic)
 

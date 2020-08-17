@@ -28,6 +28,10 @@ import ConLike
 import DataCon
 import Var
 
+#if MIN_GHC_API_VERSION(8,11,0)
+import GHC.Driver.Ppr
+#endif
+
 import qualified Documentation.Haddock.Parser as H
 import qualified Documentation.Haddock.Types as H
 
@@ -37,8 +41,13 @@ showGhc = showPpr unsafeGlobalDynFlags
 showName :: Outputable a => a -> T.Text
 showName = T.pack . prettyprint
   where
+#if MIN_GHC_API_VERSION(8,11,0)
+    prettyprint x = renderWithStyle context (ppr x)
+    context = initDefaultSDocContext unsafeGlobalDynFlags
+#else
     prettyprint x = renderWithStyle unsafeGlobalDynFlags (ppr x) style
     style = mkUserStyle unsafeGlobalDynFlags neverQualify AllTheWay
+#endif
 
 -- | Get ALL source spans in the source.
 listifyAllSpans :: (Typeable a, Data m) => m -> [Located a]

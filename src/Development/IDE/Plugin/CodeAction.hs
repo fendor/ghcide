@@ -19,7 +19,7 @@ module Development.IDE.Plugin.CodeAction
 
 import Control.Monad (join, guard)
 import Development.IDE.Plugin
-import Development.IDE.GHC.Compat
+import Development.IDE.GHC.Compat as Compat
 import Development.IDE.Core.Rules
 import Development.IDE.Core.RuleTypes
 import Development.IDE.Core.Service
@@ -50,7 +50,7 @@ import SrcLoc (sortLocated)
 import Parser
 import Text.Regex.TDFA ((=~), (=~~))
 import Text.Regex.TDFA.Text()
-import Outputable (ppr, showSDocUnsafe)
+import Outputable (ppr)
 import DynFlags (xFlags, FlagSpec(..))
 import GHC.LanguageExtensions.Type (Extension)
 import Data.Function
@@ -224,7 +224,7 @@ suggestExportUnusedTopBinding srcOpt ParsedModule{pm_parsed_source = L _ HsModul
                             $ hsmodDecls
   , Just pos <- _end . getLocatedRange <$> hsmodExports
   , Just needComma <- needsComma source <$> hsmodExports
-  , let exportName = (if needComma then "," else "") <> printExport exportType name 
+  , let exportName = (if needComma then "," else "") <> printExport exportType name
         insertPos = pos {_character = pred $ _character pos}
   = [("Export ‘" <> name <> "’", [TextEdit (Range insertPos insertPos) exportName])]
   | otherwise = []
@@ -253,7 +253,7 @@ suggestExportUnusedTopBinding srcOpt ParsedModule{pm_parsed_source = L _ HsModul
     isTopLevel :: Range -> Bool
     isTopLevel l = (_character . _start) l == 0
 
-    exportsAs :: HsDecl p -> Maybe (ExportsAs, Located (IdP p))
+    exportsAs :: HsDecl GhcPs -> Maybe (ExportsAs, Located (IdP GhcPs))
     exportsAs (ValD FunBind {fun_id})          = Just (ExportName, fun_id)
     exportsAs (ValD (PatSynBind PSB {psb_id})) = Just (ExportPattern, psb_id)
     exportsAs (TyClD SynDecl{tcdLName})      = Just (ExportName, tcdLName)
@@ -730,10 +730,10 @@ suggestNewImport packageExportsMap ParsedModule {pm_parsed_source = L _ HsModule
   , Just name <- extractNotInScopeName msg
   , Just insertLine <- case hsmodImports of
         [] -> case srcSpanStart $ getLoc (head hsmodDecls) of
-          RealSrcLoc s -> Just $ srcLocLine s - 1
+          Compat.RealSrcLoc s -> Just $ srcLocLine s - 1
           _ -> Nothing
         _ -> case srcSpanEnd $ getLoc (last hsmodImports) of
-          RealSrcLoc s -> Just $ srcLocLine s
+          Compat.RealSrcLoc s -> Just $ srcLocLine s
           _ -> Nothing
   , insertPos <- Position insertLine 0
   , extendImportSuggestions <- matchRegex msg
@@ -890,7 +890,7 @@ rangesForBinding' :: String -> LIE GhcPs -> [SrcSpan]
 rangesForBinding' b (L l x@IEVar{}) | showSDocUnsafe (ppr x) == b = [l]
 rangesForBinding' b (L l x@IEThingAbs{}) | showSDocUnsafe (ppr x) == b = [l]
 rangesForBinding' b (L l (IEThingAll x)) | showSDocUnsafe (ppr x) == b = [l]
-rangesForBinding' b (L l (IEThingWith thing _  inners labels))
+rangesForBinding' b (L l (IEThingWithPs thing _  inners labels))
     | showSDocUnsafe (ppr thing) == b = [l]
     | otherwise =
         [ l' | L l' x <- inners, showSDocUnsafe (ppr x) == b] ++

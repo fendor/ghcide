@@ -23,12 +23,11 @@ import Development.IDE.Core.Compile
 import Development.IDE.Core.PositionMapping
 import Development.IDE.Core.RuleTypes
 import Development.IDE.Core.Shake
-import Development.IDE.GHC.Compat (hsmodExports, ParsedModule(..), ModSummary (ms_hspp_buf))
+import Development.IDE.GHC.Compat (hsmodExports, ParsedModule(..), ModSummary (ms_hspp_buf), hsc_dflags, ApiAnns(..))
 
 import Development.IDE.GHC.Util
 import Development.IDE.LSP.Server
 import Control.Monad.Trans.Except (runExceptT)
-import HscTypes (HscEnv(hsc_dflags))
 import Data.Maybe
 import Data.Functor ((<&>))
 
@@ -86,7 +85,7 @@ produceCompletions = do
                                     { pm_mod_summary = ms
                                     , pm_parsed_source = hsModNoExports
                                     , pm_extra_src_files = [] -- src imports not allowed
-                                    , pm_annotations = mempty
+                                    , pm_annotations = ApiAnns mempty Nothing mempty mempty
                                     }
                         tm <- liftIO $ typecheckModule (IdeDefer True) env pm
                         case tm of

@@ -14,7 +14,7 @@ import Development.IDE.GHC.Orphans()
 import Development.IDE.Types.Location
 
 -- DAML compiler and infrastructure
-import Development.IDE.GHC.Compat
+import Development.IDE.GHC.Compat as Compat
 import Development.IDE.Types.Options
 import Development.IDE.Spans.Type as SpanInfo
 import Development.IDE.Spans.Common (showName, spanDocToMarkdown)
@@ -26,6 +26,7 @@ import Outputable hiding ((<>))
 import SrcLoc
 import Type
 import VarSet
+import DynFlags (unsafeGlobalDynFlags)
 
 import Control.Monad.Extra
 import Control.Monad.Trans.Maybe
@@ -102,7 +103,7 @@ atPoint IdeOptions{..} (SpansInfo srcSpans cntsSpans) pos = do
                           [_] -> colon <> constraintsT <> "\n=> " <> showName typ
                           _   -> colon <> "(" <> constraintsT <> ")\n=> " <> showName typ
 
-    definedAt name = "*Defined " <> T.pack (showSDocUnsafe $ pprNameDefnLoc name) <> "*\n"
+    definedAt name = "*Defined " <> T.pack (Compat.showSDoc unsafeGlobalDynFlags $ pprNameDefnLoc name) <> "*\n"
 
     crop txt
       | T.length txt > 50 = T.take 46 txt <> " ..."
@@ -177,8 +178,8 @@ querySpanInfoAt getSpan _ideOptions pos =
 nameToLocation :: Monad f => (Module -> MaybeT f (HieFile, String)) -> Name -> f (Maybe SrcSpan)
 nameToLocation getHieFile name =
   case nameSrcSpan name of
-    sp@(RealSrcSpan _) -> pure $ Just sp
-    sp@(UnhelpfulSpan _) -> runMaybeT $ do
+    sp@(Compat.RealSrcSpan _) -> pure $ Just sp
+    sp@(Compat.UnhelpfulSpan _) -> runMaybeT $ do
       guard (sp /= wiredInSrcSpan)
       -- This case usually arises when the definition is in an external package (DAML only).
       -- In this case the interface files contain garbage source spans
@@ -195,8 +196,8 @@ nameToLocation getHieFile name =
     -- We ignore uniques and source spans and only compare the name and the module.
     eqName :: Name -> Name -> Bool
     eqName n n' = nameOccName n == nameOccName n' && nameModule_maybe n == nameModule_maybe n'
-    setFileName f (RealSrcSpan span) = RealSrcSpan (span { srcSpanFile = mkFastString f })
-    setFileName _ span@(UnhelpfulSpan _) = span
+    setFileName f (Compat.RealSrcSpan span) = Compat.RealSrcSpan (span { srcSpanFile = mkFastString f })
+    setFileName _ span@(Compat.UnhelpfulSpan _) = span
 
 -- | Filter out spans which do not enclose a given point
 spansAtPoint :: Position -> [SpanInfo] -> [SpanInfo]

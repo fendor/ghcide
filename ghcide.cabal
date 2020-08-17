@@ -1,4 +1,4 @@
-cabal-version:      1.20
+cabal-version:      2.2
 build-type:         Simple
 category:           Development
 name:               ghcide
@@ -46,6 +46,7 @@ library
         deepseq,
         directory,
         extra,
+        exceptions,
         fuzzy,
         filepath,
         haddock-library >= 1.8,
@@ -81,6 +82,7 @@ library
         ghc-boot-th,
         ghc-boot,
         ghc >= 8.4,
+        ghc-api-compat,
         -- These dependencies are used by Development.IDE.Session and are
         -- Haskell specific. So don't use them when building with -fghc-lib!
         ghc-check,
@@ -190,8 +192,13 @@ library
       other-modules:
         Development.IDE.GHC.HieAst
         Development.IDE.GHC.HieBin
-    if (impl(ghc > 8.9))
+    if (impl(ghc > 8.9) && impl(ghc < 8.11))
       hs-source-dirs: src-ghc810
+      other-modules:
+        Development.IDE.GHC.HieAst
+        Development.IDE.GHC.HieBin
+    if (impl(ghc > 8.10))
+      hs-source-dirs: src-ghc811
       other-modules:
         Development.IDE.GHC.HieAst
         Development.IDE.GHC.HieBin

@@ -28,8 +28,8 @@ import Control.Exception.Safe (catch, throw)
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Outputable (showSDoc)
 import Control.DeepSeq (NFData(rnf))
+import Development.IDE.GHC.Compat
 import Control.Exception (evaluate)
 import Control.Monad.IO.Class (MonadIO)
 import Exception (ExceptionMonad)
@@ -80,7 +80,7 @@ preprocessor filename mbContents = do
         return (contents, dflags)
   where
     logAction :: IORef [CPPLog] -> LogAction
-    logAction cppLogs dflags _reason severity srcSpan _style msg = do
+    logAction cppLogs dflags _reason severity srcSpan msg = do
       let log = CPPLog severity srcSpan $ T.pack $ showSDoc dflags msg
       modifyIORef cppLogs (log :)
 

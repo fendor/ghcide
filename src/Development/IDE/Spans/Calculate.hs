@@ -28,6 +28,7 @@ import           Development.IDE.GHC.Error (zeroSpan, catchSrcErrors)
 import           Prelude hiding (mod)
 import           TcHsSyn
 import           Var
+import qualified GHC.Types.SrcLoc as SrcLoc
 import Development.IDE.Core.Compile
 import qualified Development.IDE.GHC.Compat as Compat
 import Development.IDE.GHC.Compat
@@ -108,7 +109,7 @@ getSpanInfo mods TcModuleResult{tmrModInfo, tmrModule = tcm@TypecheckedModule{..
   where cmp (_,a,_) (_,b,_)
           | a `isSubspanOf` b = LT
           | b `isSubspanOf` a = GT
-          | otherwise         = compare (srcSpanStart a) (srcSpanStart b)
+          | otherwise         = leftmost_smallest a b
 
         addEmptyInfo = map (\(a,b) -> (a,b,Nothing))
         constraintToInfo (sp, ty) = (SpanS sp, sp, Just ty)
@@ -139,7 +140,7 @@ ieLNames :: IE pass -> [Located (IdP pass)]
 ieLNames (IEVar       U n   )     = [ieLWrappedName n]
 ieLNames (IEThingAbs  U n   )     = [ieLWrappedName n]
 ieLNames (IEThingAll    n   )     = [ieLWrappedName n]
-ieLNames (IEThingWith   n _ ns _) = ieLWrappedName n : map ieLWrappedName ns
+ieLNames (IEThingWith   n ns) = ieLWrappedName n : map ieLWrappedName ns
 ieLNames _ = []
 
 -- | Get the name and type of a binding.
@@ -182,7 +183,7 @@ getTypeLHsExpr e = do
     getSpanSource (HsVar U (L _ i)) = Named (getName i)
     getSpanSource (HsConLikeOut U (RealDataCon dc)) = Named (dataConName dc)
     getSpanSource RecordCon {rcon_con_name} = Named (getName rcon_con_name)
-    getSpanSource (HsWrap U _ xpr) = getSpanSource xpr
+    -- getSpanSource (HsWrap U _ xpr) = getSpanSource xpr
     getSpanSource (HsPar U xpr) = getSpanSource (unLoc xpr)
     getSpanSource _ = NoSource
 
@@ -199,12 +200,13 @@ getTypeLHsExpr e = do
 #endif
     isLit _ = False
 
-    isTupLit (Present U xpr) = isLitChild (unLoc xpr)
+    isTupLit :: HsTupArg GhcTc -> Bool
+    isTupLit (Present _ xpr) = isLitChild (unLoc xpr)
     isTupLit _               = False
 
     -- We need special treatment for children so things like [(1)] are still treated
     -- as a list literal while not treating (1) as a literal.
-    isLitChild (HsWrap U _ xpr) = isLitChild xpr
+    -- isLitChild (HsWrap U _ xpr) = isLitChild xpr
     isLitChild (HsPar U xpr)    = isLitChild (unLoc xpr)
 #if MIN_GHC_API_VERSION(8,8,0)
     isLitChild (ExprWithTySig U xpr _) = isLitChild (unLoc xpr)
@@ -225,8 +227,8 @@ getTypeLPat pat = do
   return $ Just (src, spn, Just (hsPatType pat))
   where
     getSpanSource :: Pat GhcTc -> (SpanSource, SrcSpan)
-    getSpanSource (VarPat (L spn vid)) = (Named (getName vid), spn)
-    getSpanSource (ConPatOut (L spn (RealDataCon dc)) _ _ _ _ _ _) =
+    getSpanSource (VarPatTc (L spn vid)) = (Named (getName vid), spn)
+    getSpanSource (ConPat (L spn (RealDataCon dc))) =
       (Named (dataConName dc), spn)
     getSpanSource _ = (NoSource, noSrcSpan)
 

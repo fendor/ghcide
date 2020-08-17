@@ -20,6 +20,7 @@ import qualified Data.ByteString.Char8 as B
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
+import qualified Data.Set as Set
 import Data.Aeson
 import Data.Bifunctor
 import qualified Data.ByteString.Base16 as B16
@@ -32,6 +33,7 @@ import Data.Time.Clock
 import Data.Version
 import Development.IDE.Core.OfInterest
 import Development.IDE.Core.Shake
+import Development.IDE.GHC.Compat as Compat
 import Development.IDE.GHC.Util
 import Development.IDE.Session.VersionCheck
 import Development.IDE.Types.Diagnostics
@@ -107,9 +109,13 @@ loadSession dir = do
                      -> IO (HscEnv, ComponentInfo, [ComponentInfo])
         packageSetup (hieYaml, cfp, opts, libDir) = do
           -- Parse DynFlags for the newly discovered component
+          logInfo logger (T.pack ("packageSetup0"))
           hscEnv <- emptyHscEnv ideNc libDir
+          logInfo logger (T.pack ("packageSetup1"))
           (df, targets) <- evalGhcEnv hscEnv $
               setOptions opts (hsc_dflags hscEnv)
+
+          logInfo logger (T.pack ("packageSetup2"))
           let deps = componentDependencies opts ++ maybeToList hieYaml
           dep_info <- getDependencyInfo deps
           -- Now lookup to see whether we are combining with an existing HscEnv
@@ -124,7 +130,7 @@ loadSession dir = do
                   -- We will modify the unitId and DynFlags used for
                   -- compilation but these are the true source of
                   -- information.
-                  new_deps = RawComponentInfo (thisInstalledUnitId df) df targets cfp opts dep_info
+                  new_deps = RawComponentInfo (Compat.homeUnitId_ df) df targets cfp opts dep_info
                                 : maybe [] snd oldDeps
                   -- Get all the unit-ids for things in this component
                   inplace = map rawComponentUnitId new_deps
@@ -155,7 +161,9 @@ loadSession dir = do
               newHscEnv <-
                 -- Add the options for the current component to the HscEnv
                 evalGhcEnv hscEnv $ do
+                  liftIO $ logInfo logger (T.pack ("Before session dynflags"))
                   _ <- setSessionDynFlags df
+                  liftIO $ logInfo logger (T.pack ("set session dynflags"))
                   getSession
 
               -- Modify the map so the hieYaml now maps to the newly created
@@ -214,13 +222,13 @@ loadSession dir = do
              -- The cradle gave us some options so get to work turning them
              -- into and HscEnv.
              Right (opts, libDir) -> do
-               installationCheck <- ghcVersionChecker libDir
-               case installationCheck of
-                 InstallationNotFound{..} ->
-                     error $ "GHC installation not found in libdir: " <> libdir
-                 InstallationMismatch{..} ->
-                     return (([renderPackageSetupException cfp GhcVersionMismatch{..}], Nothing),[])
-                 InstallationChecked _compileTime _ghcLibCheck ->
+              --  installationCheck <- ghcVersionChecker libDir
+              --  case installationCheck of
+              --    InstallationNotFound{..} ->
+              --        error $ "GHC installation not found in libdir: " <> libdir
+              --    InstallationMismatch{..} ->
+              --        return (([renderPackageSetupException cfp GhcVersionMismatch{..}], Nothing),[])
+              --    InstallationChecked _compileTime _ghcLibCheck ->
                    session (hieYaml, toNormalizedFilePath' cfp, opts, libDir)
              -- Failure case, either a cradle error or the none cradle
              Left err -> do
@@ -297,7 +305,7 @@ cradleToOptsAndLibDir cradle file = do
 emptyHscEnv :: IORef NameCache -> FilePath -> IO HscEnv
 emptyHscEnv nc libDir = do
     env <- runGhc (Just libDir) getSession
-    initDynLinker env
+    -- initDynLinker env
     pure $ setNameCache nc env
 
 -- | Convert a target to a list of potential absolute paths.
@@ -327,8 +335,8 @@ newComponentCache
          -> IO ([(NormalizedFilePath, (IdeResult HscEnvEq, DependencyInfo))], (IdeResult HscEnvEq, DependencyInfo))
 newComponentCache logger hsc_env uids ci = do
     let df = componentDynFlags ci
-    let hscEnv' = hsc_env { hsc_dflags = df
-                          , hsc_IC = (hsc_IC hsc_env) { ic_dflags = df } }
+    let hscEnv' = set_hsc_dflags df hsc_env
+                          { hsc_IC = (hsc_IC hsc_env) { ic_dflags = df } }
 
     henv <- newHscEnvEq hscEnv' uids
     let res = (([], Just henv), componentDependencyInfo ci)
@@ -492,12 +500,12 @@ getDependencyInfo fs = Map.fromList <$> mapM do_one fs
 -- ID. Therefore we create a fake one and give them all the same unit id.
 removeInplacePackages :: [InstalledUnitId] -> DynFlags -> (DynFlags, [InstalledUnitId])
 removeInplacePackages us df = (df { packageFlags = ps
-                                  , thisInstalledUnitId = fake_uid }, uids)
+                                  , homeUnitId_ = fake_uid }, uids)
   where
     (uids, ps) = partitionEithers (map go (packageFlags df))
-    fake_uid = toInstalledUnitId (stringToUnitId "fake_uid")
-    go p@(ExposePackage _ (UnitIdArg u) _) = if toInstalledUnitId u `elem` us
-                                                  then Left (toInstalledUnitId u)
+    fake_uid = Compat.toInstalledUnitId (stringToUnitId "fake_uid")
+    go p@(ExposePackage _ (UnitIdArg u) _) = if Compat.toUnitId u `elem` us
+                                                  then Left (Compat.toUnitId u)
                                                   else Right p
     go p = Right p
 
@@ -535,7 +543,7 @@ setOptions (ComponentOptions theOpts compRoot _) dflags = do
     -- initPackages parses the -package flags and
     -- sets up the visibility for each component.
     -- Throws if a -package flag cannot be satisfied.
-    (final_df, _) <- liftIO $ wrapPackageSetupException $ initPackages dflags''
+    final_df <- liftIO $ wrapPackageSetupException $ initUnits Set.empty dflags''
     return (final_df, targets)
 
 
@@ -543,9 +551,8 @@ setOptions (ComponentOptions theOpts compRoot _) dflags = do
 -- (HscInterpreted) which implies LinkInMemory
 -- HscInterpreted
 setLinkerOptions :: DynFlags -> DynFlags
-setLinkerOptions df = df {
+setLinkerOptions df = setNoCode $ df {
     ghcLink   = LinkInMemory
-  , hscTarget = HscNothing
   , ghcMode = CompManager
   }
 
