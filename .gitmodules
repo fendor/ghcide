@@ -1,0 +1,12 @@
+[submodule "submodules/ghc-api-compat"]
+	path = submodules/ghc-api-compat
+	url = git@github.com:fendor/ghc-api-compat.git
+	branch = more-modules
+[submodule "submodules/hie-bios"]
+	path = submodules/hie-bios
+	url = git@github.com:fendor/hie-bios.git
+	branch = ghc-HEAD-8.11
+[submodule "submodules/ghc-check"]
+	path = submodules/ghc-check
+	url = git@github.com:fendor/ghc-check.git
+	branch = wip/HEAD/ghc-8.11
